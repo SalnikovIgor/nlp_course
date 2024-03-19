@@ -50,14 +50,15 @@ class LanguageModel(nn.Module):
     def __init__(self, vocab_size, vocab_dim):
         super().__init__()
         self.embedding = nn.Embedding(num_embeddings=vocab_size, embedding_dim=vocab_dim)
-        self.rnn = nn.GRU(input_size=vocab_dim, hidden_size=vocab_dim,
+        self.rnn = nn.RNN(input_size=vocab_dim, hidden_size=vocab_dim,
                           num_layers=2, batch_first=True, bidirectional=False)
         self.fc_1 = nn.Linear(vocab_dim, vocab_dim)
-        self.fc_2 = nn.Linear(vocab_dim, 2)
+        self.fc_2 = nn.Linear(vocab_dim, 4)
 
     def forward(self, x):
         embedding = self.embedding(x)
         x, _ = self.rnn(embedding)
+        x = x.mean(dim=1)
         x = torch.tanh(x)
         x = self.fc_1(x)
         x = torch.tanh(x)
@@ -67,10 +68,12 @@ class LanguageModel(nn.Module):
 
 model = LanguageModel(len(tokenizer.vocab), seq_size).to(device)
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+epochs = 5
+lr = 1e-3
+
+optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
 scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.2)
-epochs = 10
 
 
 def evaluate(model, val_loader, epoch):
@@ -81,7 +84,7 @@ def evaluate(model, val_loader, epoch):
         for batch in tqdm(val_loader, desc=f"Epoch {epoch+1} test: "):
             xb = batch["input_ids"]
             logits = model(xb.to(device))
-            predictions.append(logits.flatten(start_dim=1, end_dim=2).argmax(dim=1))
+            predictions.append(logits.argmax(dim=1))
             target.append(batch['labels'].to(device))
 
     predictions = torch.cat(predictions)
@@ -98,7 +101,7 @@ def train_model(model, optimizer, criterion, train_loader, val_loader, epochs, s
             optimizer.zero_grad()
             xb, yb = batch["input_ids"], batch["labels"]
             logits = model(xb.to(device))
-            loss = criterion(logits.flatten(start_dim=1, end_dim=2), yb.to(device))
+            loss = criterion(logits, yb.to(device))
             loss.backward()
             optimizer.step()
         scheduler.step()
@@ -106,4 +109,4 @@ def train_model(model, optimizer, criterion, train_loader, val_loader, epochs, s
         evaluate(model, val_loader, epoch)
 
 
-hist = train_model(model, optimizer, criterion, train_dataloader, eval_dataloader, epochs, scheduler)
+train_model(model, optimizer, criterion, train_dataloader, eval_dataloader, epochs, scheduler)
