@@ -15,7 +15,7 @@ train_texts, val_texts, train_labels, val_labels = train_test_split(
     dataset['train']['text'], dataset['train']['label'], test_size=.1)
 
 # 2. Токенезируем subsets
-seq_size = 256
+seq_size = 100
 tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
 train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=seq_size)
 val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=seq_size)
@@ -38,7 +38,7 @@ class IMDbDataset(torch.utils.data.Dataset):
 train_dataset = IMDbDataset(train_encodings, train_labels)
 val_dataset = IMDbDataset(val_encodings, val_labels)
 
-batch_size = 64
+batch_size = 256
 train_dataloader = DataLoader(
     train_dataset, shuffle=True, batch_size=batch_size)
 
@@ -68,12 +68,12 @@ class LanguageModel(nn.Module):
 
 model = LanguageModel(len(tokenizer.vocab), seq_size).to(device)
 
-epochs = 5
+epochs = 6
 lr = 1e-3
 
 optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.2)
+scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=0.8, gamma=0.125)
 
 
 def evaluate(model, val_loader, epoch):
