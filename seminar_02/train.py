@@ -6,44 +6,20 @@ import datasets
 from transformers import AutoTokenizer
 from sklearn.model_selection import train_test_split
 
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-
-# 1. Загрузим датасет и разобьем его на train и val subsets
-dataset = datasets.load_dataset('ag_news')
-dataset = dataset
-train_texts, val_texts, train_labels, val_labels = train_test_split(
-    dataset['train']['text'], dataset['train']['label'], test_size=.1)
-
-# 2. Токенезируем subsets
-seq_size = 256
-tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
-train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=seq_size)
-val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=seq_size)
-
 
 class IMDbDataset(torch.utils.data.Dataset):
-    def __init__(self, encodings, labels):
+    def __init__(self, encodings, labels, device='cuda'):
         self.encodings = encodings
         self.labels = labels
+        self.device = device
 
     def __getitem__(self, idx):
         item = {key: torch.tensor(val[idx]) for key, val in self.encodings.items()}
-        item['labels'] = torch.tensor(self.labels[idx])
+        item['labels'] = torch.tensor(self.labels[idx]).to(self.device)
         return item
 
     def __len__(self):
         return len(self.labels)
-
-
-train_dataset = IMDbDataset(train_encodings, train_labels)
-val_dataset = IMDbDataset(val_encodings, val_labels)
-
-batch_size = 64
-train_dataloader = DataLoader(
-    train_dataset, shuffle=True, batch_size=batch_size)
-
-eval_dataloader = DataLoader(
-    val_dataset, shuffle=False, batch_size=batch_size)
 
 
 class LanguageModel(nn.Module):
@@ -66,26 +42,16 @@ class LanguageModel(nn.Module):
         return x
 
 
-model = LanguageModel(len(tokenizer.vocab), seq_size).to(device)
-
-epochs = 5
-lr = 1e-3
-
-optimizer = torch.optim.Adam(model.parameters(), lr=lr)
-criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
-scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.2)
-
-
 def evaluate(model, val_loader, epoch):
+    print(model)
     model.eval()
     predictions = []
     target = []
     with torch.no_grad():
         for batch in tqdm(val_loader, desc=f"Epoch {epoch+1} test: "):
-            xb = batch["input_ids"]
-            logits = model(xb.to(device))
+            logits = model(**batch).logits
             predictions.append(logits.argmax(dim=1))
-            target.append(batch['labels'].to(device))
+            target.append(batch['labels'])
 
     predictions = torch.cat(predictions)
     target = torch.cat(target)
@@ -109,4 +75,42 @@ def train_model(model, optimizer, criterion, train_loader, val_loader, epochs, s
         evaluate(model, val_loader, epoch)
 
 
-train_model(model, optimizer, criterion, train_dataloader, eval_dataloader, epochs, scheduler)
+def main():
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    # 1. Загрузим датасет и разобьем его на train и val subsets
+    dataset = datasets.load_dataset('ag_news')
+    dataset = dataset
+    train_texts, val_texts, train_labels, val_labels = train_test_split(
+        dataset['train']['text'], dataset['train']['label'], test_size=.1)
+
+    # 2. Токенезируем subsets
+    seq_size = 256
+    tokenizer = AutoTokenizer.from_pretrained("google-bert/bert-base-uncased")
+    train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=seq_size)
+    val_encodings = tokenizer(val_texts, truncation=True, padding=True, max_length=seq_size)
+
+    train_dataset = IMDbDataset(train_encodings, train_labels)
+    val_dataset = IMDbDataset(val_encodings, val_labels)
+
+    batch_size = 64
+    train_dataloader = DataLoader(
+        train_dataset, shuffle=True, batch_size=batch_size)
+
+    eval_dataloader = DataLoader(
+        val_dataset, shuffle=False, batch_size=batch_size)
+
+    model = LanguageModel(len(tokenizer.vocab), seq_size).to(device)
+
+    epochs = 5
+    lr = 1e-3
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    criterion = torch.nn.CrossEntropyLoss(ignore_index=0)
+    scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=1, gamma=0.2)
+
+    train_model(model, optimizer, criterion, train_dataloader, eval_dataloader, epochs, scheduler)
+
+
+if __name__ == '__main__':
+    main()
